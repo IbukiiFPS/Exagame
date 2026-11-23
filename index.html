@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#ffffff" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Suan Suk" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<title>Garden of Wellbeing (Suan Suk)</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet" />
+
+<!-- CDN libraries -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
+<style>
+  /* =========================================================
+     Look: a console fitness game, not a dashboard.
+       • in-game HUD = dark translucent chips with white type, yellow highlights
+       • instructions = huge outlined words in the middle of the screen
+       • menus / results = clean white cards
+     ========================================================= */
+  :root{
+    --ink:#16213a; --muted:#7c879a; --faint:#aab3c2; --line:#e7ecf2; --soft:#f3f6fa; --card:#ffffff;
+    --cyan:#0a8fd8; --cyan-fill:#2bb4f4; --cyan-tint:#e5f5fe;
+    --gold:#ffaa00; --gold-ink:#c47a00;
+    --ok:#16b55b; --ok-fill:#2fd673; --ok-tint:#e3f9ec;
+    --warn:#f2700f; --bad:#dc2626;
+    --hud:rgba(18,28,50,.80); --hud-line:rgba(255,255,255,.14); --hl:#ffd23d; --go:#46e38a;
+    --st:env(safe-area-inset-top,0px); --sb:env(safe-area-inset-bottom,0px);
+    --sl:env(safe-area-inset-left,0px); --sr:env(safe-area-inset-right,0px);
+    --shadow:0 6px 0 rgba(22,33,58,.06),0 10px 30px rgba(22,33,58,.10);
+    --r:22px; --gap:14px;
+    --cam:clamp(220px,27vw,420px);                    /* camera window width */
+    --coach-big:min(31vw,46vh,440px);                 /* coach window while you are getting ready */
+    --coach-small:112px;                              /* coach window while you are moving */
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;background:#fff;color:var(--ink);overflow:hidden;touch-action:manipulation;overscroll-behavior:none;
+    font-family:"Nunito",ui-rounded,"SF Pro Rounded","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+    -webkit-text-size-adjust:100%}
+  button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+  button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+  [hidden]{display:none!important}
+  .num{font-variant-numeric:tabular-nums}
+  .ico{width:1em;height:1em;flex:none;vertical-align:-.12em}
+  .lbl{font-size:11px;font-weight:900;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted)}
+
+  /* ---------- stage: sky + 3D garden ---------- */
+  #camera-container{position:fixed;left:0;top:0;width:100%;height:100%;height:100dvh;overflow:hidden;
+    background:linear-gradient(#ffffff 0%,#f0f8ff 55%,#dcefff 100%)}
+  #input-video{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+  #three-canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:1}
+  .card{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow)}
+  .hudc{background:var(--hud);color:#fff;border-radius:18px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);box-shadow:0 8px 24px rgba(10,18,36,.18)}
+  .bump{animation:bump .45s ease}
+  @keyframes bump{40%{transform:scale(1.06)}}
+
+  /* ---------- top-left: exercise + count, coach ---------- */
+  #leftCol{position:absolute;z-index:7;left:calc(var(--sl) + var(--gap));top:calc(var(--st) + var(--gap));display:flex;flex-direction:column;align-items:flex-start;gap:var(--gap)}
+  #exCard{display:flex;align-items:center;gap:16px;padding:10px 10px}
+  .sw{width:38px;align-self:stretch;flex:none;display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;border-radius:12px;background:rgba(255,255,255,.1)}
+  .sw:hover{background:rgba(255,255,255,.2)} .sw:active{transform:scale(.94)}
+  #camera-container.ov .sw{visibility:hidden}
+  #exKind{font-size:11px;font-weight:900;letter-spacing:1.4px;text-transform:uppercase;color:var(--hl)}
+  #exName{font-size:clamp(15px,1.5vw,19px);font-weight:900;line-height:1.15}
+  .count{display:flex;align-items:baseline;gap:2px;padding:4px 12px 6px;border-radius:12px;background:rgba(255,255,255,.1);line-height:1}
+  .count b{font-size:clamp(30px,3.2vw,42px);font-weight:900;letter-spacing:-1px}
+  .count span{font-size:clamp(14px,1.4vw,18px);font-weight:900;color:rgba(255,255,255,.55)}
+  #fastTag{display:none;margin-top:3px;font-size:10.5px;font-weight:900;letter-spacing:1.4px;color:var(--ink);background:var(--hl);border-radius:6px;padding:1px 6px}
+  #exCard.fast #fastTag{display:inline-block}
+
+  #coachMini{position:relative;display:block;padding:0;overflow:hidden;cursor:pointer;border-radius:24px;border:4px solid #fff;
+    background:linear-gradient(#ffffff,#e9f6ee);box-shadow:0 10px 30px rgba(22,33,58,.16);
+    width:var(--coach-small);aspect-ratio:1/1;transition:width .5s cubic-bezier(.3,1.2,.4,1),border-color .2s}
+  #coachMini.big{width:var(--coach-big)}
+  #coachMini.hit{border-color:var(--go)}
+  #coachMini canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
+  #coachMini:active{transform:scale(.985)}
+  .coach-tag{display:none!important;position:absolute;left:10px;top:10px;z-index:2;padding:4px 10px;border-radius:999px;background:var(--hud);color:#fff;font-size:11px;font-weight:900;letter-spacing:1px;
+    pointer-events:none;transition:opacity .3s}
+  .steps{position:absolute;left:8px;right:8px;bottom:8px;z-index:2;display:flex;flex-direction:column;align-items:center;gap:5px;pointer-events:none}
+  #miniCap{max-width:100%;padding:4px 12px;border-radius:999px;background:var(--hud);color:#fff;font-size:12.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #coachMini.hit #miniCap{background:var(--ok)}
+  .dots{display:flex;gap:5px}
+  .dots i{width:22px;height:5px;border-radius:3px;background:rgba(22,33,58,.15);transition:background .2s}
+  .dots i.on{background:var(--ink)}
+  #coachMini:not(.big) .coach-tag,#coachMini:not(.big) #miniCap{display:none}
+  #coachMini:not(.big) .dots i{width:14px}
+
+  /* ---------- top-right: kcal / time / menu, camera ---------- */
+  #rightCol{position:absolute;z-index:7;right:calc(var(--sr) + var(--gap));top:calc(var(--st) + var(--gap));display:flex;flex-direction:column;align-items:flex-end;gap:var(--gap)}
+  #hudStats{display:flex;align-items:center;gap:4px;padding:6px 6px 6px 14px}
+  .stat{display:flex;align-items:center;gap:7px;padding:4px 10px 4px 0}
+  .stat+.stat{padding-left:12px;border-left:1px solid var(--hud-line)}
+  .stat .ico{font-size:20px}
+  .stat b{font-size:clamp(17px,1.6vw,21px);font-weight:900;line-height:1}
+  .stat small{font-size:11px;font-weight:800;color:rgba(255,255,255,.6);margin-left:2px}
+  #stKcal .ico{color:#ff8a5c} #stTime .ico{color:#7fd3ff}
+  .fab{width:42px;height:42px;flex:none;display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;border-radius:13px;background:rgba(255,255,255,.1)}
+  .fab:active{transform:scale(.95)}
+  #camWin{position:relative;overflow:hidden;width:var(--cam);aspect-ratio:4/3;border-radius:24px;border:4px solid #fff;background:#1b2436;box-shadow:0 10px 30px rgba(22,33,58,.16)}
+  #output-canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+  .cam-tag{position:absolute;left:10px;top:10px;z-index:2;display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--hud);color:#fff;font-size:11px;font-weight:900;letter-spacing:1px}
+  .cam-tag i{width:8px;height:8px;border-radius:50%;background:var(--go)}
+  #camWin.lost .cam-tag i{background:var(--warn)}
+  #camWin.lost::after{content:"Step into view";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:15px;background:rgba(27,36,54,.35)}
+  #camWin.part .cam-tag i{background:var(--hl)}
+  #camWin{transition:opacity .35s ease,transform .35s ease,visibility 0s}
+  #camWin.off{opacity:0;transform:translateY(-12px) scale(.92);visibility:hidden;pointer-events:none;transition:opacity .35s ease,transform .35s ease,visibility 0s .35s}
+
+  /* ---------- Grandpa's demo: the coach big in the middle, everything else dimmed ---------- */
+  #camera-container.demo::after{content:"";position:absolute;inset:0;z-index:6;background:rgba(236,246,255,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  #camera-container.demo #exCard,#camera-container.demo #rightCol,#camera-container.demo #bottom,#camera-container.demo #prompt{visibility:hidden}
+  #camera-container.demo #coachMini{position:fixed;z-index:8;top:50%;left:max(var(--gap),calc(50% - 500px));transform:translateY(-50%);
+    width:min(54vw,80vh,600px);transition:none;cursor:default}
+  #demo{position:absolute;z-index:8;top:50%;right:max(var(--gap),calc(50% - 500px));transform:translateY(-50%);width:min(380px,calc(100% - min(54vw,80vh,600px) - 3 * var(--gap)));
+    padding:22px 22px 18px;animation:dmIn .5s .1s cubic-bezier(.2,1.3,.4,1) both}
+  @keyframes dmIn{from{opacity:0;transform:translate(30px,-50%)}}
+  .dm-tag{display:inline-block;padding:4px 12px;border-radius:999px;background:var(--ok-tint);color:var(--ok);font-weight:900;font-size:12px;letter-spacing:1.4px}
+  #dmName{font-size:clamp(24px,2.4vw,32px);font-weight:900;letter-spacing:-.5px;line-height:1.1;margin-top:10px}
+  #dmKind{display:block;margin-top:4px;color:var(--muted);font-weight:800}
+  #demoSteps{list-style:none;display:grid;gap:8px;margin:16px 0 14px}
+  #demoSteps li{display:flex;gap:12px;align-items:center;padding:10px 12px;border-radius:14px;background:var(--soft);font-weight:800;font-size:15.5px;line-height:1.3;color:var(--muted);transition:all .25s}
+  #demoSteps li b{flex:none;width:28px;height:28px;border-radius:50%;background:var(--line);color:var(--ink);display:flex;align-items:center;justify-content:center;font-size:13px;transition:all .25s}
+  #demoSteps li.on{background:var(--ok-tint);color:var(--ink);transform:scale(1.03)}
+  #demoSteps li.on b{background:var(--ok);color:#fff}
+  .dm-bar{height:10px;border-radius:999px;background:var(--line);overflow:hidden}
+  #demoFill{display:block;height:100%;width:0;background:var(--ok-fill);border-radius:999px}
+  #demoSkip{margin-top:14px;min-height:52px;font-size:17px}
+  .dm-fine{margin-top:8px;font-size:12.5px;font-weight:800;color:var(--muted);text-align:center}
+  @media (max-width:900px),(orientation:portrait){
+    #camera-container.demo #coachMini{top:calc(var(--st) + var(--gap));left:50%;transform:translateX(-50%);width:min(88vw,50dvh)}
+    #demo{top:auto;bottom:calc(var(--sb) + var(--gap));right:50%;transform:translateX(50%);width:min(460px,calc(100% - 2 * var(--gap)));padding:14px 16px}
+    @keyframes dmIn{from{opacity:0;transform:translate(50%,30px)}}
+    #dmName{margin-top:6px} #demoSteps{margin:10px 0;gap:5px} #demoSteps li{padding:7px 10px;font-size:14px}
+  }
+  @media (max-height:480px){
+    #camera-container.demo #coachMini{width:min(46vw,86vh)}
+    #demoSteps li{padding:5px 10px;font-size:13px} #demo{padding:12px 14px} .dm-fine{display:none}
+  }
+
+  /* ---------- screen wipe between menu → demo → round ---------- */
+  #wipe{position:fixed;inset:0;z-index:25;display:flex;align-items:center;justify-content:center;pointer-events:none;
+    background:radial-gradient(circle at 50% 45%,#5fe39a,#16a34a 70%);clip-path:circle(0% at 50% 50%);transition:clip-path .55s cubic-bezier(.65,0,.35,1)}
+  #wipe.on{clip-path:circle(80% at 50% 50%);pointer-events:auto}
+  #wipeTxt{font-size:clamp(48px,9vw,110px);font-weight:900;font-style:italic;letter-spacing:-1px;color:#fff;text-align:center;padding:0 20px;
+    -webkit-text-stroke:clamp(8px,1.1vw,12px) var(--ink);paint-order:stroke fill;text-shadow:0 10px 0 rgba(22,33,58,.18);opacity:0;transform:scale(.7)}
+  #wipe.on #wipeTxt{animation:wipeTx .6s .25s cubic-bezier(.2,1.5,.4,1) forwards}
+  @keyframes wipeTx{to{opacity:1;transform:none}}
+
+  /* ---------- farmer picker ---------- */
+  .av-pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-top:8px}
+  .av-opt{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 6px 10px;border-radius:16px;background:var(--soft);border:2.5px solid transparent;text-align:center;line-height:1.15}
+  .av-opt img{width:72px;height:86px;object-fit:contain;border-radius:12px;background:linear-gradient(#ffffff,#e3f4e9)}
+  .av-opt b{font-size:14px;font-weight:900;margin-top:4px}
+  .av-opt small{font-size:11px;font-weight:700;color:var(--muted)}
+  .av-opt.on{border-color:var(--ok);background:var(--ok-tint)}
+  .av-opt:active{transform:scale(.97)}
+  .av-bot{width:72px;height:86px;border-radius:12px;background:#dfe5ee;color:#7c879a;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:900}
+  .w-card .av-pick{grid-template-columns:repeat(4,1fr);margin:6px 0 18px}
+  .w-card .av-opt small{display:none}
+  .w-pick-h{margin-top:20px;font-size:11px;font-weight:900;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted)}
+
+  /* ---------- the big instruction in the middle ---------- */
+  #prompt{position:absolute;z-index:8;left:50%;top:calc(var(--st) + 26px);transform:translateX(-50%);width:min(680px,calc(100% - 2 * var(--cam) - 4 * var(--gap)));
+    text-align:center;pointer-events:none;line-height:1}
+  #pmBadge{display:inline-block;margin-bottom:6px;padding:3px 12px;border-radius:8px;background:var(--hl);color:var(--ink);font-size:13px;font-weight:900;letter-spacing:2px;animation:fastp .6s ease-in-out infinite alternate}
+  @keyframes fastp{to{transform:scale(1.08)}}
+  #pmRow{display:flex;align-items:center;justify-content:center;gap:12px}
+  #pmTxt{display:block;font-size:clamp(40px,6.4vw,84px);font-weight:900;font-style:italic;letter-spacing:-.5px;color:#fff;
+    -webkit-text-stroke:clamp(7px,1vw,11px) var(--ink);paint-order:stroke fill;text-shadow:0 8px 0 rgba(22,33,58,.15)}
+  #prompt.hold #pmTxt{color:var(--hl)}
+  #prompt.back #pmTxt{color:#9fe0ff}
+  #prompt.warn #pmTxt{color:#ffb38a}
+  #prompt.count #pmTxt{color:var(--go);font-style:normal}
+  #prompt.pop{animation:pmPop .35s cubic-bezier(.2,1.6,.4,1)}
+  @keyframes pmPop{0%{transform:translateX(-50%) scale(.7)}100%{transform:translateX(-50%)}}
+  #pmSub{display:none!important;margin-top:10px;padding:6px 16px;border-radius:999px;background:var(--hud);color:#fff;font-size:clamp(14px,1.5vw,18px);font-weight:800}
+  #pmSub:empty{display:none}
+  #pmHold{width:min(260px,70%);height:12px;margin:12px auto 0;border-radius:999px;background:rgba(22,33,58,.25);overflow:hidden;box-shadow:0 0 0 3px #fff}
+  #pmHold i{display:block;height:100%;width:0;background:var(--hl);border-radius:999px}
+  .pm-fruit{width:clamp(44px,5vw,64px);height:clamp(44px,5vw,64px);flex:none;border-radius:50%;border:4px solid var(--ink);position:relative;box-shadow:inset -7px -8px 0 rgba(0,0,0,.14)}
+  .pm-fruit::after{content:"";position:absolute;left:52%;top:-11px;width:18px;height:9px;border-radius:50%;background:#2fae55;border:3px solid var(--ink)}
+  .pm-fruit.apple{background:#e8263f} .pm-fruit.orange{background:#ff9418}
+
+  /* ---------- bottom: progress squares + hint + form gauge ---------- */
+  #bottom{position:absolute;left:0;right:0;bottom:0;z-index:7;display:flex;flex-direction:column;align-items:center;
+    padding:0 calc(var(--sr) + var(--gap)) calc(var(--sb) + var(--gap)) calc(var(--sl) + var(--gap));pointer-events:none}
+  #bottom>*{pointer-events:auto}
+  #coachBox{width:min(680px,100%);padding:12px 16px 12px}
+  .prog-row{display:flex;align-items:center;gap:12px}
+  #prog{flex:1;display:flex;gap:5px;align-items:center}
+  #prog i{flex:1;aspect-ratio:1/1;max-width:30px;border-radius:6px;background:rgba(255,255,255,.14);transition:background .25s,transform .25s}
+  #prog i.fast{box-shadow:inset 0 0 0 2px var(--hl);background:rgba(255,210,61,.12)}
+  #prog i.gap{flex:0 0 6px;width:6px;background:none;box-shadow:none}
+  #prog i.on{background:var(--go);transform:scale(1.06)}
+  #prog i.fast.on{background:var(--hl)}
+  #prog i.next{background:rgba(255,255,255,.32)}
+  #progNum{flex:none;font-weight:900;font-size:20px}
+  #progNum span{color:rgba(255,255,255,.55);font-size:15px}
+  .hint-row{display:none!important;align-items:center;gap:12px;margin-top:9px}
+  #banner{flex:1;min-width:0;font-weight:800;font-size:clamp(14px,1.4vw,16px);color:rgba(255,255,255,.88);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #banner.warn{color:#ffb38a}
+  #banner.ok{color:var(--go)}
+  .gauge{flex:0 0 38%;display:flex;align-items:center;gap:8px}
+  .track{position:relative;flex:1;height:8px;border-radius:999px;background:rgba(255,255,255,.14);overflow:hidden}
+  #formFill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:999px;background:#7fd3ff;transition:width .12s linear}
+  .gauge.hit #formFill{background:var(--go)}
+  #formVal{flex:none;font-weight:800;font-size:12px;color:rgba(255,255,255,.6);min-width:70px;text-align:right}
+  .gauge.hit #formVal{color:var(--go)}
+
+  /* ---------- milestone popup (3-2-1, GO!, FASTER!, FINISH!) ---------- */
+  #toast{position:absolute;left:50%;top:42%;z-index:9;transform:translate(-50%,-50%) scale(.6);opacity:0;pointer-events:none;text-align:center;line-height:1}
+  #toast.show{animation:judge 1.3s cubic-bezier(.2,1.4,.4,1) forwards}
+  @keyframes judge{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}15%{opacity:1;transform:translate(-50%,-50%) scale(1.08)}
+    25%{transform:translate(-50%,-50%) scale(1)}80%{opacity:1;transform:translate(-50%,-55%) scale(1)}100%{opacity:0;transform:translate(-50%,-62%) scale(.96)}}
+  #tWord{display:block;font-size:clamp(56px,10vw,120px);font-weight:900;font-style:italic;letter-spacing:-1px;color:var(--hl);
+    -webkit-text-stroke:clamp(8px,1.1vw,12px) var(--ink);paint-order:stroke fill;text-shadow:0 10px 0 rgba(22,33,58,.15)}
+  #tWord.count{color:#fff;font-size:clamp(100px,17vw,200px);font-style:normal}
+  #tWord.go{color:var(--go);font-size:clamp(90px,15vw,180px)}
+  #tWord.fast{color:var(--hl)}
+  #tWord.finish{color:var(--go)}
+  #tWord.goal{color:#ff7aa8}
+  #tSub{display:inline-block;margin-top:8px;padding:6px 16px;border-radius:999px;background:var(--hud);color:#fff;font-weight:900;font-size:clamp(14px,1.8vw,20px)}
+
+  /* ---------- game select (gesture carousel) + results ---------- */
+  .overlay{position:absolute;z-index:8;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:min(500px,calc(100% - 2 * max(var(--coach-big),var(--cam)) - 6 * var(--gap)));max-height:calc(100% - 24px);overflow:auto;
+    padding:20px 22px 18px;text-align:center;animation:ovIn .4s cubic-bezier(.2,1.3,.4,1)}
+  @keyframes ovIn{from{opacity:0;transform:translate(-50%,-44%) scale(.94)}}
+  .overlay h2{font-size:clamp(24px,2.5vw,32px);font-weight:900;letter-spacing:-.5px;line-height:1.1}
+  .car{display:flex;align-items:stretch;gap:8px;margin-top:10px}
+  .car-btn{position:relative;overflow:hidden;flex:0 0 64px;border-radius:18px;background:var(--soft);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    color:var(--ink);font-weight:900;font-size:11px;line-height:1.15;padding:8px 4px}
+  .car-btn svg{width:28px;height:28px;position:relative}
+  .car-btn span{position:relative;color:var(--muted)}
+  .car-btn .hfill{position:absolute;left:0;right:0;bottom:0;height:0;top:auto;width:auto;background:rgba(10,143,216,.18);transition:height .1s linear}
+  .car-card{flex:1;min-width:0;padding:4px 0}
+  .ov-kind{display:inline-block;margin-top:6px;padding:3px 12px;border-radius:999px;background:var(--cyan-tint);color:var(--cyan);font-weight:900;font-size:13px}
+  .ov-goal{margin-top:8px;font-weight:700;color:var(--muted);font-size:15px}
+  .car-dots{display:flex;justify-content:center;gap:6px;margin:12px 0 4px}
+  .car-dots i{width:8px;height:8px;border-radius:50%;background:var(--line);transition:all .2s}
+  .car-dots i.on{width:22px;border-radius:5px;background:var(--ink)}
+  .ov-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 4px}
+  .ov-stats div{background:var(--soft);border-radius:14px;padding:9px 4px 8px}
+  .ov-stats b{display:block;font-size:21px;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums}
+  .ov-stats .lbl{font-size:9.5px}
+  .in-steps{list-style:none;text-align:left;margin:12px 0 4px;display:grid;gap:7px}
+  .in-steps li{display:flex;gap:10px;align-items:center;font-weight:700;font-size:15px;line-height:1.3}
+  .in-steps b{flex:none;width:26px;height:26px;border-radius:50%;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px}
+  .handbtn{position:relative;overflow:hidden}
+  .handbtn>span,.handbtn>small{position:relative}
+  .handbtn>.hfill{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(255,255,255,.35);transition:width .1s linear}
+  #inGo{margin-top:12px}
+  .gest{display:flex;justify-content:center;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-size:12.5px;font-weight:800;color:var(--muted)}
+  .gest span{display:inline-flex;align-items:center;gap:5px}
+  .gest svg{width:17px;height:17px;color:var(--cyan)}
+  #rsDone{display:flex;justify-content:center;gap:4px;margin:14px 0 6px}
+  #rsDone i{width:14px;height:14px;border-radius:4px;background:var(--line)}
+  #rsDone i.on{background:var(--ok-fill);animation:sqIn .3s cubic-bezier(.2,1.6,.4,1) both}
+  #rsDone i.fast.on{background:var(--gold)}
+  @keyframes sqIn{from{transform:scale(0)}}
+  #rsMsg{font-weight:900;font-size:18px}
+  #rsBest{display:inline-block;margin-top:6px;padding:3px 12px;border-radius:999px;background:var(--gold);color:#fff;font-weight:900;font-size:12px;letter-spacing:1.2px;text-transform:uppercase}
+  .daily{display:flex;align-items:center;gap:10px;margin:10px 0 14px;font-size:13px;font-weight:800;color:var(--muted)}
+  .daily .bar{position:relative;flex:1;height:10px;border-radius:999px;background:var(--line);overflow:hidden}
+  #rsDayFill{position:absolute;left:0;top:0;bottom:0;background:var(--ok-fill);border-radius:999px}
+  .daily b{color:var(--ink)}
+  .ov-btns{display:flex;gap:8px}
+  .ov-btns .big{min-height:58px;font-size:17px}
+  .ov-btns #rsAgain{flex:0 0 34%}
+  #rsNext{display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1}
+  #rsNext small{font-size:11px;font-weight:800;opacity:.85;margin-top:2px}
+  #camera-container.ov #prompt{display:none}
+  .desk-only{display:none}
+  @media (min-width:900px) and (hover:hover){ .desk-only{display:block} }
+
+  /* ---------- responsive ---------- */
+  @media (max-width:1100px){ :root{--coach-big:min(28vw,42vh)} }
+  /* phones in portrait */
+  @media (max-width:640px){
+    :root{--gap:8px;--r:18px;--cam:40vw;--coach-big:50vw;--coach-small:22vw}
+    #exCard{gap:8px;padding:6px;max-width:60vw} .sw{width:30px;font-size:15px} #exName{font-size:13px} #exKind{font-size:9.5px}
+    .count b{font-size:26px} .count{padding:3px 8px 4px}
+    #hudStats{padding:4px 4px 4px 10px} .stat{gap:4px;padding-right:6px} .stat+.stat{padding-left:7px} .stat .ico{font-size:15px} .stat b{font-size:14px} .stat small{display:none}
+    .fab{width:34px;height:34px;font-size:17px;border-radius:10px}
+    #camWin,#coachMini{border-width:3px;border-radius:18px}
+    .cam-tag,.coach-tag{font-size:9px;padding:3px 7px}
+    #prompt{top:auto;bottom:calc(var(--sb) + 130px);width:calc(100% - 2 * var(--gap))}
+    #pmTxt{font-size:44px;-webkit-text-stroke:7px var(--ink)}
+    #coachBox{padding:10px 12px} #progNum{font-size:16px} #prog{gap:3px} #prog i{border-radius:4px}
+    .gauge{display:none}
+    .overlay{top:auto;bottom:calc(var(--sb) + var(--gap));transform:translateX(-50%);width:calc(100% - 2 * var(--gap));max-height:58%;padding:16px 14px 14px}
+    @keyframes ovIn{from{opacity:0;transform:translate(-50%,20px)}}
+    #camera-container.ov #bottom{visibility:hidden}
+    .in-steps{display:none} .car-btn{flex-basis:54px}
+  }
+  /* phones in landscape */
+  @media (max-height:480px){
+    :root{--gap:8px;--cam:min(26vw,220px);--coach-big:min(24vw,40vh);--coach-small:80px}
+    #pmTxt{font-size:40px} #prompt{top:calc(var(--st) + 10px)}
+    #coachBox{padding:8px 12px} .hint-row{margin-top:5px}
+    .overlay{padding:12px 16px;max-height:calc(100% - 16px)} .in-steps,.ov-goal,.daily,.gest{display:none} .ov-stats{margin:6px 0}
+    #camera-container.ov #bottom{visibility:hidden}
+  }
+
+  /* loading / error overlay */
+  #status{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+    text-align:center;background:rgba(255,255,255,.96);padding:24px;font-size:18px;font-weight:700;line-height:1.5}
+  #status.hidden{display:none}
+  .spin{width:46px;height:46px;border-radius:50%;border:5px solid var(--cyan-tint);border-top-color:var(--cyan-fill);animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #status.err .spin{display:none}
+  #status.err #statusMsg{color:var(--bad)}
+
+  /* ---------- buttons / form bits (shared) ---------- */
+  .big{width:100%;min-height:60px;border-radius:18px;font-weight:900;font-size:20px;background:var(--soft);color:var(--ink);box-shadow:inset 0 -4px 0 rgba(22,33,58,.08)}
+  .big.primary{background:var(--cyan);color:#fff;box-shadow:inset 0 -5px 0 rgba(0,0,0,.15)}
+  .big:active{transform:translateY(2px)}
+  .pbtn{min-height:46px;padding:10px 16px;border-radius:14px;font-weight:800;font-size:15px;background:var(--soft);color:var(--ink);border:1.5px solid var(--line)}
+  .pbtn:hover:not(:disabled){border-color:var(--cyan-fill)}
+  .pbtn:disabled{opacity:.45;cursor:not-allowed}
+  .pbtn.primary{background:var(--cyan);border-color:var(--cyan);color:#fff}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .fld{display:block;font-size:13px;color:var(--muted);margin-top:12px;font-weight:700}
+  .fld select,.fld input,.cal-name{display:block;width:100%;margin-top:6px;min-height:46px;background:var(--soft);color:var(--ink);border:1.5px solid var(--line);
+    border-radius:12px;padding:8px 12px;font-size:16px;font-family:inherit;font-weight:700}
+  .legend{font-size:13px;color:var(--muted);margin-top:10px;line-height:1.45}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin:0 4px 0 0;vertical-align:-1px}
+  .tog{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:50px;font-size:16px;font-weight:700;cursor:pointer;border-bottom:1px solid var(--line)}
+  .tog input{width:24px;height:24px;accent-color:#0a8fd8;flex:none}
+  .seg{display:flex;gap:6px;margin-bottom:10px;background:var(--soft);padding:4px;border-radius:14px}
+  .seg button{flex:1;min-height:42px;border-radius:11px;font-weight:800;font-size:15px;color:var(--muted)}
+  .seg button.on{background:#fff;color:var(--ink);box-shadow:0 2px 8px rgba(22,33,58,.1)}
+
+  /* ---------- sheets (coach + menu) ---------- */
+  #backdrop{position:fixed;inset:0;z-index:19;background:rgba(22,33,58,.3);opacity:0;visibility:hidden;transition:opacity .25s,visibility 0s .25s}
+  #backdrop.show{opacity:1;visibility:visible;transition:opacity .25s}
+  .sheet{position:fixed;z-index:20;left:0;right:0;bottom:0;max-height:84vh;max-height:84dvh;background:#fff;display:flex;flex-direction:column;
+    border-radius:28px 28px 0 0;box-shadow:0 -12px 40px rgba(22,33,58,.18);transform:translateY(105%);visibility:hidden;
+    transition:transform .28s ease,visibility 0s .28s}
+  .sheet.open{transform:none;visibility:visible;transition:transform .28s ease}
+  .sheet-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:18px 18px 8px}
+  .sheet-h h2{font-size:22px;font-weight:900}
+  .x{width:44px;height:44px;border-radius:50%;background:var(--soft);font-size:18px;color:var(--muted);font-weight:900}
+  .sheet-b{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 18px calc(var(--sb) + 20px)}
+  .sheet-b h3{font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:var(--muted);margin:22px 0 6px;font-weight:900}
+  .sheet-b h3:first-child{margin-top:4px}
+  @media (min-width:900px){
+    .sheet{left:auto;top:0;bottom:0;width:390px;max-height:none;border-radius:0;transform:translateX(105%)}
+    .sheet.open{transform:none}
+  }
+
+  #gCap{font-size:15px;margin:10px 2px 8px;min-height:22px;line-height:1.4;font-weight:700}
+  #chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{font-size:13px;padding:6px 12px;border-radius:999px;background:var(--soft);border:1px solid var(--line);color:var(--muted);font-weight:800}
+  .chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+  .chip.hit{background:var(--ok-tint);border-color:var(--ok-fill);color:var(--ok)}
+  .read{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:12px;font-size:16px;font-weight:700;opacity:.45}
+  .read.focus{opacity:1;background:var(--soft)}
+  .read b{font-size:22px;font-weight:900;color:var(--cyan);font-variant-numeric:tabular-nums}
+  .read.hit b{color:var(--ok)}
+  .read small{display:block;font-size:12px;color:var(--muted);font-weight:700}
+  .about{font-size:13px;color:var(--muted);line-height:1.55}
+  .about a{color:var(--cyan)}
+
+  /* ---------- welcome screen ---------- */
+  #welcome{position:fixed;inset:0;z-index:30;background:linear-gradient(#ffffff,#e6f3ff);display:flex;align-items:center;justify-content:center;
+    padding:calc(var(--st) + 16px) 20px calc(var(--sb) + 16px);overflow:auto}
+  #welcome.hide{display:none}
+  .w-card{width:min(460px,100%);text-align:center;margin:auto}
+  .w-logo{width:84px;height:84px;margin:0 auto;border-radius:28px;background:var(--ok-fill);color:#fff;display:flex;align-items:center;justify-content:center;
+    box-shadow:inset 0 -6px 0 rgba(0,0,0,.12),0 10px 30px rgba(22,181,91,.3)}
+  .w-logo svg{width:50px;height:50px}
+  .w-card h1{font-size:clamp(28px,7vw,38px);font-weight:900;margin-top:16px;letter-spacing:-.5px}
+  .w-card .sub{color:var(--muted);margin-top:2px;font-weight:800}
+  .tips{list-style:none;text-align:left;margin:24px 0;padding:6px;display:grid;gap:2px}
+  .tips li{display:flex;gap:14px;align-items:center;padding:12px 12px;font-size:16px;font-weight:700;line-height:1.35}
+  .tips li+li{border-top:1px solid var(--line)}
+  .tips li b{flex:none;width:34px;height:34px;border-radius:50%;background:var(--cyan-tint);color:var(--cyan);display:flex;align-items:center;justify-content:center;font-weight:900}
+  .w-card .big+.big{margin-top:10px}
+  .fine{margin-top:16px;font-size:12px;color:var(--muted);font-weight:700}
+
+  /* ---------- calibration wizard ---------- */
+  #calib{position:fixed;inset:0;z-index:50;background:#fff;display:flex;overflow:auto;
+    padding:calc(var(--st) + 10px) 14px calc(var(--sb) + 14px)}
+  #calib[hidden]{display:none}
+  .cal-box{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;width:min(1100px,100%);margin:auto}
+  @media (min-width:820px) and (orientation:landscape){ .cal-box{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:28px} #calibView{max-height:76dvh!important} }
+  #calibView{display:block;width:100%;height:auto;max-height:36dvh;object-fit:contain;background:#1b2436;border-radius:22px;transform:scaleX(-1);box-shadow:var(--shadow)}
+  #calChecks{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+  .chk{padding:10px 12px;border-radius:14px;background:var(--soft);font-size:14px;color:var(--muted);font-weight:800}
+  .chk.on{color:var(--ok);background:var(--ok-tint)}
+  .chk.opt.off{outline:1.5px dashed var(--line);outline-offset:-1.5px}
+  .cal-box>div:last-child{display:flex;flex-direction:column}
+  #calStepNo{order:1}#calTitle{order:2}#calText{order:3}#calGesture{order:4}#calMsg{order:5}#calCount{order:6}#calBar{order:7}#calLive{order:8}#calSummary{order:9}.cal-actions{order:10}
+  #calStepNo{font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:var(--muted);font-weight:900}
+  #calTitle{font-size:clamp(28px,6.5vw,38px);color:var(--ink);margin:4px 0 8px;font-weight:900;letter-spacing:-.5px}
+  #calText{font-size:clamp(16px,4.2vw,19px);line-height:1.5;font-weight:700}
+  #calLive{font-size:18px;color:var(--cyan);margin-top:10px;min-height:26px;font-variant-numeric:tabular-nums;font-weight:900}
+  #calCount{font-size:clamp(52px,14vw,80px);font-weight:900;color:var(--gold);min-height:1.2em;line-height:1.2}
+  #calBar{height:12px;background:var(--line);border-radius:999px;overflow:hidden}
+  #calBar i{display:block;height:100%;width:0;background:var(--cyan-fill);border-radius:999px}
+  #calMsg{font-size:17px;min-height:46px;margin-top:8px;font-weight:800}
+  #calMsg.bad{color:var(--warn)}
+  #calMsg.good{color:var(--ok)}
+  #calib #calGesture{border:0;border-radius:14px;background:var(--cyan-tint);color:var(--cyan);font-weight:800}
+  #calib #calGesture.lower{background:#fff3e8;color:var(--warn)}
+  #calib #calGesture .gbar{background:#fff}
+  .cal-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .cal-actions .pbtn{font-size:17px;padding:12px 22px;min-height:52px}
+  #calSummary table{width:100%;border-collapse:collapse;font-size:16px;margin:8px 0}
+  #calSummary td,#calSummary th{padding:8px;border-bottom:1px solid var(--line);text-align:left}
+  #calSummary th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1.4px}
+  #calSummary td.diff{color:var(--gold-ink);font-weight:900}
+  #calSummary ul{margin:8px 0 8px 20px;font-size:15px;color:var(--warn)}
+</style>
+</head>
+<body>
+
+<!-- tiny inline icon set -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-flame" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2c.6 3.3-1 5.2-2.6 7C8 10.6 7 12.2 7 14.5A5 5 0 0 0 12 19.5a5 5 0 0 0 5-5c0-1.7-.6-3-1.4-4.1-.3 1.2-1 2-2 2.4.4-3.7-.7-7-1.6-10.8Z"/><path fill="currentColor" opacity=".35" d="M12 22a7.5 7.5 0 0 1-7.5-7.5c0-.9.1-1.7.4-2.5A7 7 0 0 0 12 20.5a7 7 0 0 0 7.1-8.5c.3.8.4 1.6.4 2.5A7.5 7.5 0 0 1 12 22Z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M12 7v5l3.2 2" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-hand" viewBox="0 0 24 24"><path fill="currentColor" d="M8.5 11V4.8a1.3 1.3 0 0 1 2.6 0V10h.6V3.3a1.3 1.3 0 0 1 2.6 0V10h.6V4.6a1.3 1.3 0 0 1 2.6 0V14c0 4.2-2.6 7.5-6.4 7.5-2.4 0-3.9-1.1-5.2-3.1L3.4 14a1.3 1.3 0 0 1 2.1-1.5l1.6 2V6.8a1.3 1.3 0 0 1 2.6 0V11z"/></symbol>
+  <symbol id="i-twist" viewBox="0 0 24 24"><path d="M4 12h16M7 8l-4 4 4 4M17 8l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-leaf" viewBox="0 0 24 24"><path fill="currentColor" d="M20 4c-9 0-15 4-15 11 0 1.4.3 2.6.8 3.6C7.5 14 10.6 10.8 15 9c-3.6 2.4-6.2 5.6-7.7 10.3.9.5 2 .7 3.2.7C17.3 20 20 13 20 4Z"/></symbol>
+</svg>
+
+<!-- ============ STAGE ============ -->
+<div id="camera-container">
+  <video id="input-video" playsinline muted></video>
+  <canvas id="three-canvas"></canvas>
+
+  <!-- LEFT: exercise + count, then the coach (big while you get ready, small while you move) -->
+  <div id="leftCol">
+    <div class="hudc" id="exCard">
+      <button class="sw" id="swPrev" aria-label="Switch to the previous game"><svg class="ico"><use href="#i-left"/></svg></button>
+      <div><div id="exKind">Sit-to-Stand</div><div id="exName">Sweet Potato Pull</div><span id="fastTag">FASTER</span></div>
+      <div class="count num" id="bdReps"><b id="reps">0</b><span>/<span id="goal">20</span></span></div>
+      <button class="sw" id="swNext" aria-label="Switch to the next game"><svg class="ico"><use href="#i-right"/></svg></button>
+    </div>
+    <button id="coachMini" class="big" aria-label="Coach – tap for details">
+      <canvas id="grandpa3d"></canvas>
+      <span class="coach-tag" id="coachTag">Follow Grandpa</span>
+      <div class="steps"><span id="miniCap">Coach</span><span class="dots" id="miniDots"><i></i><i></i><i></i></span></div>
+    </button>
+  </div>
+
+  <!-- RIGHT: kcal, time, menu, then the camera with pose hints -->
+  <div id="rightCol">
+    <div class="hudc" id="hudStats">
+      <div class="stat" id="stKcal"><svg class="ico"><use href="#i-flame"/></svg><b id="kcal" class="num">0.0</b><small>kcal</small></div>
+      <div class="stat" id="stTime"><svg class="ico"><use href="#i-clock"/></svg><b id="time" class="num">0:00</b></div>
+      <button class="fab" id="btnMenu" aria-label="Open menu"><svg class="ico"><use href="#i-menu"/></svg></button>
+    </div>
+    <div id="camWin" class="lost">
+      <canvas id="output-canvas" width="640" height="480"></canvas>
+      <span class="cam-tag"><i></i><span id="camTxt">No body</span></span>
+    </div>
+  </div>
+
+  <!-- MIDDLE: what to do right now -->
+  <div id="prompt" role="status" aria-live="polite" hidden>
+    <div><span id="pmBadge" hidden>FASTER!</span></div>
+    <div id="pmRow"><span class="pm-fruit" id="pmFruitL" hidden></span><span id="pmTxt">STAND UP!</span><span class="pm-fruit" id="pmFruitR" hidden></span></div>
+    <div id="pmHold" hidden><i id="pmHoldFill"></i></div>
+    <span id="pmSub"></span>
+  </div>
+
+  <!-- GAME SELECT – switch with a hand or a twist, start with both hands -->
+  <section class="card overlay" id="intro" aria-label="Choose a game" hidden>
+    <div class="lbl">Choose a game</div>
+    <div class="car">
+      <button class="car-btn" id="carPrev" aria-label="Previous game"><span class="hfill"></span><svg><use href="#i-left"/></svg><span id="carPrevName">Fruit Sorting</span></button>
+      <div class="car-card">
+        <h2 id="inName">Sweet Potato Pull</h2>
+        <span class="ov-kind" id="inKind">Sit-to-Stand</span>
+        <p class="ov-goal" id="inGoal"></p>
+        <div class="ov-stats">
+          <div><b id="inReps">15+5</b><span class="lbl">reps</span></div>
+          <div><b id="inBest">—</b><span class="lbl">best time</span></div>
+          <div><b id="inRound">1</b><span class="lbl">round</span></div>
+        </div>
+        <ol class="in-steps" id="inSteps"></ol>
+      </div>
+      <button class="car-btn" id="carNext" aria-label="Next game"><span class="hfill"></span><svg><use href="#i-right"/></svg><span id="carNextName">High Fruit Picking</span></button>
+    </div>
+    <div class="car-dots" id="carDots"><i></i><i></i><i></i></div>
+    <button class="big primary handbtn" id="inGo"><span class="hfill"></span><span>Start</span></button>
+    <div class="gest">
+      <span><svg><use href="#i-hand"/></svg>Left / right hand: switch</span>
+      <span><svg><use href="#i-twist"/></svg>Twist: switch</span>
+      <span><svg><use href="#i-hand"/></svg><svg style="margin-left:-9px"><use href="#i-hand"/></svg>Both hands: start</span>
+    </div>
+  </section>
+
+  <!-- ROUND RESULTS -->
+  <section class="card overlay" id="results" aria-label="Round results" hidden>
+    <div class="lbl" id="rsHead">Round complete</div>
+    <h2 id="rsName">Sweet Potato Pull</h2>
+    <div id="rsDone"></div>
+    <div id="rsMsg">Well done!</div>
+    <span id="rsBest" hidden>New record</span>
+    <div class="ov-stats">
+      <div><b id="rsReps">0</b><span class="lbl">reps</span></div>
+      <div><b id="rsTime">0:00</b><span class="lbl">time</span></div>
+      <div><b id="rsKcal">0</b><span class="lbl">kcal</span></div>
+    </div>
+    <div class="daily"><span>Today</span><div class="bar"><div id="rsDayFill"></div></div><span><b id="rsToday">0 / 20</b> reps</span></div>
+    <div class="ov-btns">
+      <button class="big" id="rsAgain">Again</button>
+      <button class="big primary handbtn" id="rsNext"><span class="hfill"></span><span>Next game</span><small id="rsNextLbl"></small></button>
+    </div>
+    <div class="gest"><span><svg><use href="#i-hand"/></svg><svg style="margin-left:-9px"><use href="#i-hand"/></svg>Raise both hands for the next game</span></div>
+  </section>
+
+  <!-- GRANDPA'S DEMO – watch the move before your turn -->
+  <section class="card" id="demo" aria-label="Watch Grandpa" hidden>
+    <span class="dm-tag">WATCH GRANDPA</span>
+    <h2 id="dmName">Sweet Potato Pull</h2>
+    <span id="dmKind">Sit-to-Stand</span>
+    <ol id="demoSteps"></ol>
+    <div class="dm-bar"><i id="demoFill"></i></div>
+    <button class="big primary handbtn" id="demoSkip"><span class="hfill"></span><span>I'm ready – start now</span></button>
+    <p class="dm-fine">Got it? Raise one hand to start straight away</p>
+  </section>
+
+  <div id="toast" role="status" aria-live="polite"><span id="tWord">GO!</span><span id="tSub"></span></div>
+
+  <!-- BOTTOM: round progress (one square per rep), a short hint, the live form gauge -->
+  <div id="bottom">
+    <div class="hudc" id="coachBox">
+      <div class="prog-row"><div id="prog"></div><div id="progNum" class="num">0<span>/20</span></div></div>
+      <div class="hint-row">
+        <div id="banner" role="status">Loading…</div>
+        <div class="gauge" id="gauge"><div class="track"><div id="formFill"></div></div><span id="formVal" class="num">--</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="status" class="hidden" role="alert">
+    <div class="spin"></div>
+    <p id="statusMsg">Starting camera and loading the pose model…<br>Please allow camera access.</p>
+    <button class="pbtn primary" id="statusRetry" hidden>Try again</button>
+  </div>
+</div>
+
+<div id="backdrop"></div>
+<div id="wipe" aria-hidden="true"><span id="wipeTxt"></span></div>
+
+<!-- ============ COACH SHEET ============ -->
+<section class="sheet" id="coachSheet" aria-label="Coach">
+  <div class="sheet-h"><h2>Coach</h2><button class="x" data-close aria-label="Close">✕</button></div>
+  <div class="sheet-b">
+    <div class="seg">
+      <button id="segCoach" class="on">Show correct form</button>
+      <button id="segMirror">Mirror me</button>
+    </div>
+    <div id="gCap"></div>
+    <div id="chips"></div>
+    <div class="legend"><i style="background:#2fd673;opacity:.6"></i>Green ghost = the target pose</div>
+    <p class="legend desk-only">Keys: <b>←</b> <b>→</b> or <b>1</b> <b>2</b> <b>3</b> switch game (also mid-game) · <b>Enter</b> start · <b>M</b> menu · <b>F</b> full screen</p>
+
+    <h3>Live joint angles</h3>
+    <div class="read" id="rowHip"   data-modes="potato"><span>Hip angle<small id="tHip">target</small></span><b id="rHip">--</b></div>
+    <div class="read" id="rowThigh" data-modes="potato"><span>Thigh verticality<small id="tThigh">target</small></span><b id="rThigh">--</b></div>
+    <div class="read" id="rowKnee"  data-modes="potato"><span>Knee angle<small>information</small></span><b id="rKnee">--</b></div>
+    <div class="read" id="rowLean"  data-modes="potato"><span>Torso lean<small>information</small></span><b id="rLean">--</b></div>
+    <div class="read" id="rowArms"  data-modes="fruit"><span>Arm raise (L / R)<small id="tArms">target</small></span><b id="rArms">--</b></div>
+    <div class="read" id="rowTwist" data-modes="sort"><span>Torso twist<small id="tTwist">target</small></span><b id="rTwist">--</b></div>
+  </div>
+</section>
+
+<!-- ============ MENU SHEET ============ -->
+<section class="sheet" id="menuSheet" aria-label="Menu">
+  <div class="sheet-h"><h2>Menu</h2><button class="x" data-close aria-label="Close">✕</button></div>
+  <div class="sheet-b">
+    <h3>Your farmer</h3>
+    <div class="av-pick" data-bot="1"></div>
+
+    <h3>Body profile</h3>
+    <label class="fld">Active profile
+      <select id="profSel"></select>
+    </label>
+    <label class="fld">Leg used for sit-to-stand
+      <select id="sideSel">
+        <option value="auto">Auto (best visible)</option>
+        <option value="L">My left leg</option>
+        <option value="R">My right leg</option>
+      </select>
+    </label>
+    <div class="legend" id="profInfo"></div>
+    <div class="btnrow">
+      <button class="pbtn primary" id="calBtn">Calibrate…</button>
+      <button class="pbtn" id="profDel">Delete</button>
+      <button class="pbtn" id="profCopy">Copy session</button>
+    </div>
+
+    <h3>Settings</h3>
+    <label class="fld">Daily goal
+      <select id="goalSel"><option value="10">10 reps</option><option value="20">20 reps</option><option value="30">30 reps</option><option value="50">50 reps</option></select>
+    </label>
+    <label class="fld">Round size
+      <select id="roundSel"><option value="15+5">15 reps + 5 faster</option><option value="10+5">10 reps + 5 faster</option><option value="6+2">6 reps + 2 faster (gentle)</option></select>
+    </label>
+    <label class="fld">Body weight (kg) – used for the calorie estimate
+      <input id="weightIn" type="number" inputmode="decimal" min="30" max="150" step="1" value="60">
+    </label>
+    <label class="fld">Tracking quality
+      <select id="qualSel">
+        <option value="auto">Auto (fast on phones)</option>
+        <option value="fast">Fast – smoother on phones</option>
+        <option value="accurate">Accurate – needs a stronger device</option>
+      </select>
+    </label>
+    <label class="tog" style="margin-top:8px"><span>Show correct-form coach</span><input type="checkbox" id="coachOn" checked></label>
+    <label class="tog"><span>Show camera on menus (hidden while you play)</span><input type="checkbox" id="showCam" checked></label>
+    <label class="tog"><span>Sound effects</span><input type="checkbox" id="soundOn" checked></label>
+
+    <div class="btnrow">
+      <button class="pbtn" id="resetBtn">Reset this session</button>
+      <button class="pbtn" id="fsBtn">Full screen</button>
+    </div>
+
+    <h3>About</h3>
+    <p class="about">
+      Camera video is processed on this device and is not uploaded. Calories are rough estimates from typical activity values – not medical advice.
+      Optional Y Bot player model: “Y Bot from Mixamo” by KinderKiev (Sketchfab), CC BY 4.0.
+    </p>
+  </div>
+</section>
+
+<!-- ============ WELCOME ============ -->
+<div id="welcome">
+  <div class="w-card">
+    <div class="w-logo"><svg><use href="#i-leaf"/></svg></div>
+    <h1>Garden of Wellbeing</h1>
+    <p class="sub">Suan Suk · gentle movement game</p>
+    <ol class="tips card">
+      <li><b>1</b>Lean your phone against something steady, about 2 metres away.</li>
+      <li><b>2</b>Keep your whole body in the picture, with light in front of you.</li>
+      <li><b>3</b>For sit-and-stand, put a sturdy chair side-on to the camera.</li>
+    </ol>
+    <div class="w-pick-h">Choose your farmer</div>
+    <div class="av-pick" data-bot="0"></div>
+    <button class="big primary" id="startBtn">Start</button>
+    <button class="big" id="startCalBtn">Calibrate first</button>
+    <p class="fine">Your camera is only used to follow your movement on this device.</p>
+  </div>
+</div>
+
+<!-- ============ CALIBRATION WIZARD ============ -->
+<div id="calib" hidden>
+  <div class="cal-box">
+    <div>
+      <canvas id="calibView" width="1280" height="720"></canvas>
+      <div id="calChecks">
+        <div class="chk" id="chkHead">Head &amp; shoulders</div>
+        <div class="chk" id="chkArms">Arms &amp; hands</div>
+        <div class="chk" id="chkHips">Hips</div>
+        <div class="chk opt" id="chkLegs">Legs &amp; feet (optional)</div>
+      </div>
+    </div>
+    <div>
+      <div id="calStepNo"></div>
+      <h2 id="calTitle"></h2>
+      <p id="calText"></p>
+      <div id="calLive"></div>
+      <div id="calCount"></div>
+      <div id="calBar"><i></i></div>
+      <div id="calMsg"></div>
+      <div id="calSummary" hidden></div>
+      <div class="cal-actions">
+        <button class="pbtn primary" id="calStart">Start</button>
+        <button class="pbtn" id="calSkip">Skip this step</button>
+        <button class="pbtn" id="calCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Order matters: game.js creates the shared GW object first -->
+<script src="game.js"></script>
+<script src="calibration.js"></script>
+<script src="mediapipe.js"></script>
+<script src="three-scene.js"></script>
+<script>GW.boot();</script>
+</body>
+</html>

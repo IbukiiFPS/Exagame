@@ -1,0 +1,15 @@
+# Old local snapshots (git history replaces these)
+_backup_*/
+
+# Large 3D model files – the optional "Y Bot" avatar loads y_bot_from_mixamo.glb if present
+*.glb
+*.gltf
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.log
+node_modules/
